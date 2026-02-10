@@ -1,0 +1,61 @@
+services:
+  app:
+    build: 
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: ia-app
+    ports:
+      - "5100:5000"
+    depends_on:
+      - provider
+
+  provider:
+    build:
+      context: ./provider
+    container_name: ia-provider
+    ports:
+      - "3101:3001"
+
+  load-test:
+    profiles: ["test"]
+    image: grafana/k6:latest
+    volumes:
+      - ./platform/k6:/scripts
+    entrypoint: ["k6", "run", "--out", "influxdb=http://influxdb:8086/k6", "/scripts/test.js"]
+    environment:
+      - TARGET_URL=http://app:5000
+    depends_on:
+      - app
+      - influxdb
+
+  influxdb:
+    image: influxdb:1.8
+    container_name: ia-influxdb
+    volumes:
+      - ./platform/influxdb:/docker-entrypoint-initdb.d
+    environment:
+      - INFLUXDB_DB=k6
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ia-grafana
+    ports:
+      - "3100:3000"
+    volumes:
+      - ./platform/grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    depends_on:
+      - influxdb
+
+  provider-check:
+    profiles: ["tools"]
+    image: grafana/k6:latest
+    container_name: ia-provider-check
+    volumes:
+      - ./platform/k6:/scripts
+    command: run /scripts/health-check.js
+    depends_on:
+      - provider
